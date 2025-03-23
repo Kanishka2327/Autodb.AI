@@ -1,0 +1,197 @@
+import { Entity, Field, Relationship, ERDiagram } from '@shared/types';
+
+/**
+ * Parses SQL schema string to extract entities and their fields
+ * @param schema SQL schema string
+ * @returns ER diagram representation of the schema
+ */
+export function parseSchemaToERD(schema: string): ERDiagram {
+  const entities: Entity[] = [];
+  const relationships: Relationship[] = [];
+  
+  // Regular expressions to match table creation and field definitions
+  const tableRegex = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?(\w+)["']?\s*\(([\s\S]*?)\);/gim;
+  const fieldRegex = /\s*["']?(\w+)["']?\s+([A-Za-z0-9() ]+)(?:\s+(\w+(?:\s+\w+)*))*(?:,|$)/gim;
+  const foreignKeyRegex = /FOREIGN\s+KEY\s*\(["']?(\w+)["']?\)\s*REFERENCES\s+["']?(\w+)["']?\s*\(["']?(\w+)["']?\)/gim;
+  
+  // Find all CREATE TABLE statements
+  let tableMatch;
+  let entityIndex = 0;
+  while ((tableMatch = tableRegex.exec(schema)) !== null) {
+    const tableName = tableMatch[1];
+    const tableContent = tableMatch[2];
+    
+    // Create entity for this table
+    const entity: Entity = {
+      id: `entity-${entityIndex++}`,
+      name: tableName,
+      position: { x: 100 + (entityIndex * 300) % 900, y: 100 + Math.floor(entityIndex / 3) * 250 },
+      fields: []
+    };
+    
+    // Parse fields
+    let fieldMatch;
+    let fieldIndex = 0;
+    while ((fieldMatch = fieldRegex.exec(tableContent)) !== null) {
+      if (fieldMatch[0].trim().startsWith('CONSTRAINT') || 
+          fieldMatch[0].trim().startsWith('PRIMARY KEY') || 
+          fieldMatch[0].trim().startsWith('FOREIGN KEY')) {
+        continue; // Skip constraint definitions
+      }
+      
+      const fieldName = fieldMatch[1];
+      const fieldType = fieldMatch[2];
+      const constraints = fieldMatch[3] ? fieldMatch[3].split(/\s+/) : [];
+      
+      const field: Field = {
+        id: `${entity.id}-field-${fieldIndex++}`,
+        name: fieldName,
+        type: fieldType.trim(),
+        constraints: constraints,
+        isPrimaryKey: constraints.includes('PRIMARY') || constraints.includes('IDENTITY') || constraints.includes('SERIAL'),
+        isForeignKey: false
+      };
+      
+      entity.fields.push(field);
+    }
+    
+    // Find primary keys in constraints
+    const primaryKeyRegex = /PRIMARY\s+KEY\s*\(["']?(\w+(?:\s*,\s*["']?\w+["']?)*)["']?\)/gim;
+    let pkMatch;
+    if ((pkMatch = primaryKeyRegex.exec(tableContent)) !== null) {
+      const pkFields = pkMatch[1].split(',').map(f => f.trim().replace(/["']/g, ''));
+      for (const field of entity.fields) {
+        if (pkFields.includes(field.name)) {
+          field.isPrimaryKey = true;
+        }
+      }
+    }
+    
+    entities.push(entity);
+  }
+  
+  // Process foreign key relationships
+  let relationshipIndex = 0;
+  for (const entity of entities) {
+    // Reset regex
+    foreignKeyRegex.lastIndex = 0;
+    
+    // Find foreign key relationships in the schema
+    const tableContent = schema.match(new RegExp(`CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?["']?${entity.name}["']?\\s*\\((.*?)\\);`, 'ims'));
+    
+    if (tableContent && tableContent[1]) {
+      let fkMatch;
+      while ((fkMatch = foreignKeyRegex.exec(tableContent[1])) !== null) {
+        const sourceFieldName = fkMatch[1];
+        const targetEntityName = fkMatch[2];
+        const targetFieldName = fkMatch[3];
+        
+        // Find the target entity
+        const targetEntity = entities.find(e => e.name.toLowerCase() === targetEntityName.toLowerCase());
+        if (targetEntity) {
+          // Update the field to mark it as a foreign key
+          const sourceField = entity.fields.find(f => f.name === sourceFieldName);
+          if (sourceField) {
+            sourceField.isForeignKey = true;
+            sourceField.references = {
+              table: targetEntityName,
+              field: targetFieldName
+            };
+          }
+          
+          // Create the relationship
+          relationships.push({
+            id: `relationship-${relationshipIndex++}`,
+            sourceId: entity.id,
+            targetId: targetEntity.id,
+            sourceField: sourceFieldName,
+            targetField: targetFieldName,
+            type: "one-to-many" // Default assumption
+          });
+        }
+      }
+    }
+  }
+  
+  return { entities, relationships };
+}
+
+/**
+ * Converts an ER diagram to SQL schema
+ * @param diagram ER diagram
+ * @param dbType Database type
+ * @returns SQL schema string
+ */
+export function convertERToSchema(diagram: ERDiagram, dbType: string): string {
+  const { entities, relationships } = diagram;
+  let schema = '';
+  
+  // Create tables
+  for (const entity of entities) {
+    schema += `-- ${entity.name} Table\n`;
+    schema += `CREATE TABLE ${entity.name} (\n`;
+    
+    const fieldLines = entity.fields.map(field => {
+      let line = `    ${field.name} ${field.type}`;
+      
+      // Add constraints directly on the field
+      if (field.isPrimaryKey) {
+        if (dbType === 'PostgreSQL' && field.type.toUpperCase().includes('SERIAL')) {
+          // For PostgreSQL, SERIAL types implicitly create a sequence and primary key
+          line += ' PRIMARY KEY';
+        } else if (dbType === 'SQL Server' && field.type.toUpperCase().includes('IDENTITY')) {
+          // For SQL Server, IDENTITY columns are often primary keys
+          line += ' PRIMARY KEY';
+        } else if (!field.constraints.includes('PRIMARY KEY')) {
+          line += ' PRIMARY KEY';
+        }
+      }
+      
+      // Add other constraints that aren't already in the field definition
+      const constraintsToAdd = field.constraints.filter(c => 
+        !line.includes(c) && !['PRIMARY', 'KEY'].includes(c)
+      );
+      
+      if (constraintsToAdd.length > 0) {
+        line += ' ' + constraintsToAdd.join(' ');
+      }
+      
+      return line;
+    });
+    
+    // Add field definitions
+    schema += fieldLines.join(',\n');
+    
+    // Add foreign key constraints
+    const foreignKeys = relationships.filter(rel => 
+      entities.find(e => e.id === rel.sourceId)?.name === entity.name
+    );
+    
+    if (foreignKeys.length > 0) {
+      schema += ',\n';
+      
+      const fkLines = foreignKeys.map(fk => {
+        const targetEntity = entities.find(e => e.id === fk.targetId);
+        return `    FOREIGN KEY (${fk.sourceField}) REFERENCES ${targetEntity?.name}(${fk.targetField})`;
+      });
+      
+      schema += fkLines.join(',\n');
+    }
+    
+    schema += '\n);\n\n';
+  }
+  
+  // Create indexes (optional)
+  for (const entity of entities) {
+    const foreignKeyFields = entity.fields.filter(f => f.isForeignKey);
+    
+    if (foreignKeyFields.length > 0) {
+      for (const field of foreignKeyFields) {
+        schema += `-- Create Index on ${entity.name}.${field.name}\n`;
+        schema += `CREATE INDEX idx_${entity.name.toLowerCase()}_${field.name} ON ${entity.name}(${field.name});\n\n`;
+      }
+    }
+  }
+  
+  return schema;
+}
