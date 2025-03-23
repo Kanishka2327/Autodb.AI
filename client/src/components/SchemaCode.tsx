@@ -3,15 +3,23 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { CodeIcon } from "lucide-react";
+import { CodeIcon, RefreshCcw } from "lucide-react";
 
 interface SchemaCodeProps {
   sqlCode: string;
   dbType: string;
   onChangeDbType: (dbType: string) => void;
+  onUpdateCode?: () => void;
+  isUpdatingCode?: boolean;
 }
 
-export default function SchemaCode({ sqlCode, dbType, onChangeDbType }: SchemaCodeProps) {
+export default function SchemaCode({ 
+  sqlCode, 
+  dbType, 
+  onChangeDbType, 
+  onUpdateCode, 
+  isUpdatingCode = false 
+}: SchemaCodeProps) {
   const dbTypes = [
     { value: "mysql", label: "MySQL" },
     { value: "postgresql", label: "PostgreSQL" },
@@ -42,6 +50,29 @@ export default function SchemaCode({ sqlCode, dbType, onChangeDbType }: SchemaCo
               ))}
             </SelectContent>
           </Select>
+          
+          {onUpdateCode && (
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={onUpdateCode} 
+              disabled={isUpdatingCode}
+              className="text-xs"
+            >
+              {isUpdatingCode ? (
+                <>
+                  <RefreshCcw className="h-3 w-3 mr-1 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <RefreshCcw className="h-3 w-3 mr-1" />
+                  Update Code
+                </>
+              )}
+            </Button>
+          )}
+          
           <Button variant="ghost" size="icon" onClick={handleFormatCode} title="Format Code">
             <CodeIcon className="h-4 w-4" />
           </Button>

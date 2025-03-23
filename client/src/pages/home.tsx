@@ -151,6 +151,8 @@ export default function Home() {
               sqlCode={sqlCode}
               dbType={dbType}
               onChangeDbType={changeDbType}
+              onUpdateCode={updateCodeFromDiagram}
+              isUpdatingCode={isUpdatingCode}
             />
           </>
         ) : (
