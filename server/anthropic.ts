@@ -14,76 +14,73 @@ export class AnthropicService {
 
   async generateDatabaseSchema(prompt: string, dbType: string = 'mysql'): Promise<{ schema: DatabaseSchema; sqlCode: string }> {
     try {
-      const systemPrompt = `You are an expert database architect. Your task is to generate a complete database schema based on a user's description.
-      
-First, analyze the requirements and design an optimal database structure. 
-Then, provide TWO outputs in the exact format specified:
+      const systemPrompt = `You are an expert database architect who generates valid database schemas from descriptions.
 
-1. A structured JSON representation of the database schema with:
-   - entities: array of tables, each with fields, data types, constraints
-   - relationships: connections between tables with cardinality (1:1, 1:N, N:M)
+Your task is to:
+1. Create a comprehensive database schema with tables, fields, and relationships
+2. Output valid SQL to create this schema
+3. Return ONLY a properly formatted JSON object with the schema and SQL
 
-2. The complete SQL code to create the schema in ${dbType} format
-
-The JSON must be valid and follow this exact structure:
+RESPONSE FORMAT - Your entire response must be a single valid JSON object:
 {
-  "entities": [
-    {
-      "id": "unique-id-1",
-      "name": "table_name",
-      "fields": [
-        {
-          "id": "field-id-1",
-          "name": "field_name",
-          "type": "data_type",
-          "isPrimaryKey": boolean,
-          "isForeignKey": boolean,
-          "isNotNull": boolean,
-          "isUnique": boolean,
-          "defaultValue": "optional_default_value",
-          "references": {
-            "table": "referenced_table_name",
-            "field": "referenced_field_name"
+  "schema": {
+    "entities": [
+      {
+        "id": "entity-1",
+        "name": "table_name",
+        "fields": [
+          {
+            "id": "field-1-1",
+            "name": "field_name",
+            "type": "DATA_TYPE",
+            "isPrimaryKey": true,
+            "isForeignKey": false,
+            "isNotNull": true,
+            "isUnique": false,
+            "defaultValue": null
           }
-        }
-      ],
-      "position": {
-        "x": 100,
-        "y": 100
+        ],
+        "position": {"x": 100, "y": 100}
       }
-    }
-  ],
-  "relationships": [
-    {
-      "id": "relationship-id-1",
-      "sourceEntityId": "unique-id-of-source-entity",
-      "sourceFieldId": "field-id-in-source-entity",
-      "targetEntityId": "unique-id-of-target-entity",
-      "targetFieldId": "field-id-in-target-entity",
-      "type": "1:N"
-    }
-  ]
+    ],
+    "relationships": [
+      {
+        "id": "relationship-1",
+        "sourceEntityId": "entity-1",
+        "sourceFieldId": "field-1-1",
+        "targetEntityId": "entity-2",
+        "targetFieldId": "field-2-1",
+        "type": "1:N"
+      }
+    ]
+  },
+  "sqlCode": "CREATE TABLE..."
 }
 
-Place each entity at a reasonable position in the diagram by setting x/y coordinates.
-Each ID must be unique. Use descriptive names for tables and fields.
-For the SQL code, include appropriate comments, indexes, and constraints.
+CRITICAL REQUIREMENTS:
+- Return ONLY raw JSON with NO code blocks, markdown, or explanations
+- Each entity must have a unique ID (entity-1, entity-2, etc.)
+- Each field must have a unique ID within its entity (field-N-1, field-N-2, etc.)
+- Each relationship must reference valid entity and field IDs
+- Use reasonable x/y coordinates for entity positions (spread between 100-800)
+- SQL code should be valid ${dbType} syntax
+- The entire response must parse as valid JSON
 
-Respond with ONLY a JSON object with these exact two keys:
-{
-  "schema": {... the JSON schema as described above ...},
-  "sqlCode": "... the complete SQL code as a string ..."
-}`;
+Your output will be programmatically parsed and must follow this specification exactly.`;
 
       // Call Anthropic API
+      console.log("Sending prompt to Anthropic:", prompt);
+      
       const response = await this.anthropic.messages.create({
         model: 'claude-3-7-sonnet-20250219',
         max_tokens: 4000,
-        system: systemPrompt,
+        system: systemPrompt + "\n\nIMPORTANT: Your entire response MUST be a valid JSON object. No markdown code blocks or explanations - JUST the raw JSON object.",
         messages: [
           { role: 'user', content: prompt }
         ],
       });
+      
+      console.log("Raw response from Anthropic API:", JSON.stringify(response, null, 2));
       
       try {
         // Extract and parse the JSON response
