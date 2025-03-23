@@ -15,10 +15,12 @@ export default function Home() {
     sqlCode, 
     dbType,
     isGenerating,
+    isUpdatingCode,
     generateSchema, 
     updateSchema,
     resetSchema,
-    changeDbType
+    changeDbType,
+    updateCodeFromDiagram
   } = useSchema();
   
   const [editEntityId, setEditEntityId] = useState<string | null>(null);

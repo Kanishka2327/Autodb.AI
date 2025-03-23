@@ -1,11 +1,11 @@
-import { Entity, Field, Relationship, ERDiagram } from '@shared/types';
+import { Entity, Field, Relationship, DatabaseSchema } from '@shared/types';
 
 /**
  * Parses SQL schema string to extract entities and their fields
  * @param schema SQL schema string
- * @returns ER diagram representation of the schema
+ * @returns DatabaseSchema representation of the schema
  */
-export function parseSchemaToERD(schema: string): ERDiagram {
+export function parseSchemaToERD(schema: string): DatabaseSchema {
   const entities: Entity[] = [];
   const relationships: Relationship[] = [];
   
@@ -25,8 +25,8 @@ export function parseSchemaToERD(schema: string): ERDiagram {
     const entity: Entity = {
       id: `entity-${entityIndex++}`,
       name: tableName,
-      position: { x: 100 + (entityIndex * 300) % 900, y: 100 + Math.floor(entityIndex / 3) * 250 },
-      fields: []
+      fields: [],
+      position: { x: 100 + (entityIndex * 300) % 900, y: 100 + Math.floor(entityIndex / 3) * 250 }
     };
     
     // Parse fields
@@ -44,12 +44,14 @@ export function parseSchemaToERD(schema: string): ERDiagram {
       const constraints = fieldMatch[3] ? fieldMatch[3].split(/\s+/) : [];
       
       const field: Field = {
-        id: `${entity.id}-field-${fieldIndex++}`,
+        id: `field-${entityIndex}-${fieldIndex++}`,
         name: fieldName,
         type: fieldType.trim(),
-        constraints: constraints,
         isPrimaryKey: constraints.includes('PRIMARY') || constraints.includes('IDENTITY') || constraints.includes('SERIAL'),
-        isForeignKey: false
+        isForeignKey: false,
+        isNotNull: constraints.includes('NOT') && constraints.includes('NULL'),
+        isUnique: constraints.includes('UNIQUE'),
+        defaultValue: getDefaultValue(constraints)
       };
       
       entity.fields.push(field);
@@ -89,25 +91,28 @@ export function parseSchemaToERD(schema: string): ERDiagram {
         // Find the target entity
         const targetEntity = entities.find(e => e.name.toLowerCase() === targetEntityName.toLowerCase());
         if (targetEntity) {
-          // Update the field to mark it as a foreign key
+          // Find the source and target fields
           const sourceField = entity.fields.find(f => f.name === sourceFieldName);
-          if (sourceField) {
+          const targetField = targetEntity.fields.find(f => f.name === targetFieldName);
+          
+          if (sourceField && targetField) {
+            // Update the field to mark it as a foreign key
             sourceField.isForeignKey = true;
             sourceField.references = {
               table: targetEntityName,
               field: targetFieldName
             };
+            
+            // Create the relationship (assuming 1:N by default for foreign keys)
+            relationships.push({
+              id: `relationship-${relationshipIndex++}`,
+              sourceEntityId: targetEntity.id,
+              sourceFieldId: targetField.id,
+              targetEntityId: entity.id,
+              targetFieldId: sourceField.id,
+              type: "1:N"
+            });
           }
-          
-          // Create the relationship
-          relationships.push({
-            id: `relationship-${relationshipIndex++}`,
-            sourceId: entity.id,
-            targetId: targetEntity.id,
-            sourceField: sourceFieldName,
-            targetField: targetFieldName,
-            type: "one-to-many" // Default assumption
-          });
         }
       }
     }
@@ -116,44 +121,49 @@ export function parseSchemaToERD(schema: string): ERDiagram {
   return { entities, relationships };
 }
 
+// Helper function to extract default value from constraints
+function getDefaultValue(constraints: string[]): string | undefined {
+  const defaultValueRegex = /DEFAULT\s+(.+)/i;
+  const fullConstraintStr = constraints.join(' ');
+  const match = fullConstraintStr.match(defaultValueRegex);
+  return match ? match[1] : undefined;
+}
+
 /**
- * Converts an ER diagram to SQL schema
- * @param diagram ER diagram
+ * Converts a DatabaseSchema to SQL schema string
+ * @param diagram DatabaseSchema
  * @param dbType Database type
  * @returns SQL schema string
  */
-export function convertERToSchema(diagram: ERDiagram, dbType: string): string {
+export function convertERToSchema(diagram: DatabaseSchema, dbType: string): string {
   const { entities, relationships } = diagram;
   let schema = '';
   
   // Create tables
   for (const entity of entities) {
-    schema += `-- ${entity.name} Table\n`;
     schema += `CREATE TABLE ${entity.name} (\n`;
     
     const fieldLines = entity.fields.map(field => {
-      let line = `    ${field.name} ${field.type}`;
+      let line = `  ${field.name} ${field.type}`;
       
-      // Add constraints directly on the field
+      // Add PRIMARY KEY constraint if field is a primary key
       if (field.isPrimaryKey) {
-        if (dbType === 'PostgreSQL' && field.type.toUpperCase().includes('SERIAL')) {
-          // For PostgreSQL, SERIAL types implicitly create a sequence and primary key
-          line += ' PRIMARY KEY';
-        } else if (dbType === 'SQL Server' && field.type.toUpperCase().includes('IDENTITY')) {
-          // For SQL Server, IDENTITY columns are often primary keys
-          line += ' PRIMARY KEY';
-        } else if (!field.constraints.includes('PRIMARY KEY')) {
-          line += ' PRIMARY KEY';
-        }
+        line += ' PRIMARY KEY';
       }
       
-      // Add other constraints that aren't already in the field definition
-      const constraintsToAdd = field.constraints.filter(c => 
-        !line.includes(c) && !['PRIMARY', 'KEY'].includes(c)
-      );
+      // Add NOT NULL constraint if field cannot be null
+      if (field.isNotNull && !line.includes('NOT NULL')) {
+        line += ' NOT NULL';
+      }
       
-      if (constraintsToAdd.length > 0) {
-        line += ' ' + constraintsToAdd.join(' ');
+      // Add UNIQUE constraint if field must be unique
+      if (field.isUnique && !line.includes('UNIQUE')) {
+        line += ' UNIQUE';
+      }
+      
+      // Add DEFAULT value if specified
+      if (field.defaultValue && !line.includes('DEFAULT')) {
+        line += ` DEFAULT ${field.defaultValue}`;
       }
       
       return line;
@@ -163,17 +173,24 @@ export function convertERToSchema(diagram: ERDiagram, dbType: string): string {
     schema += fieldLines.join(',\n');
     
     // Add foreign key constraints
-    const foreignKeys = relationships.filter(rel => 
-      entities.find(e => e.id === rel.sourceId)?.name === entity.name
+    const foreignKeyRelationships = relationships.filter(rel => 
+      rel.targetEntityId === entity.id
     );
     
-    if (foreignKeys.length > 0) {
+    if (foreignKeyRelationships.length > 0) {
       schema += ',\n';
       
-      const fkLines = foreignKeys.map(fk => {
-        const targetEntity = entities.find(e => e.id === fk.targetId);
-        return `    FOREIGN KEY (${fk.sourceField}) REFERENCES ${targetEntity?.name}(${fk.targetField})`;
-      });
+      const fkLines = foreignKeyRelationships.map(rel => {
+        const sourceEntity = entities.find(e => e.id === rel.sourceEntityId);
+        const sourceField = sourceEntity?.fields.find(f => f.id === rel.sourceFieldId);
+        const targetField = entity.fields.find(f => f.id === rel.targetFieldId);
+        
+        if (sourceEntity && sourceField && targetField) {
+          return `  FOREIGN KEY (${targetField.name}) REFERENCES ${sourceEntity.name}(${sourceField.name})` + 
+                (dbType.toLowerCase() === 'mysql' ? ' ON DELETE CASCADE' : '');
+        }
+        return '';
+      }).filter(line => line.length > 0);
       
       schema += fkLines.join(',\n');
     }
@@ -181,15 +198,15 @@ export function convertERToSchema(diagram: ERDiagram, dbType: string): string {
     schema += '\n);\n\n';
   }
   
-  // Create indexes (optional)
+  // Create indexes for foreign keys (optional enhancement)
   for (const entity of entities) {
     const foreignKeyFields = entity.fields.filter(f => f.isForeignKey);
     
     if (foreignKeyFields.length > 0) {
       for (const field of foreignKeyFields) {
-        schema += `-- Create Index on ${entity.name}.${field.name}\n`;
-        schema += `CREATE INDEX idx_${entity.name.toLowerCase()}_${field.name} ON ${entity.name}(${field.name});\n\n`;
+        schema += `CREATE INDEX idx_${entity.name.toLowerCase()}_${field.name} ON ${entity.name}(${field.name});\n`;
       }
+      schema += '\n';
     }
   }
   
