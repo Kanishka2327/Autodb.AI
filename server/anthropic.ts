@@ -88,27 +88,103 @@ Respond with ONLY a JSON object with these exact two keys:
       try {
         // Extract and parse the JSON response
         const content = response.content[0].text;
-        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
-                         content.match(/{[\s\S]*?schema[\s\S]*?sqlCode[\s\S]*?}/);
+        console.log("Received Anthropic response:", content);
         
-        let jsonContent = '';
-        if (jsonMatch && jsonMatch[1]) {
-          jsonContent = jsonMatch[1];
-        } else if (jsonMatch) {
-          jsonContent = jsonMatch[0];
-        } else {
-          jsonContent = content;
+        // Try several strategies to extract valid JSON
+        let extractedJson = null;
+        
+        // Strategy 1: Look for JSON in code blocks
+        const jsonCodeBlockMatch = content.match(/```(?:json)?\n([\s\S]*?)\n```/);
+        if (jsonCodeBlockMatch && jsonCodeBlockMatch[1]) {
+          try {
+            const cleanedJson = jsonCodeBlockMatch[1]
+              .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // Remove control characters
+              .replace(/\\"/g, '"')  // Fix escaped quotes
+              .replace(/^```json\s*/, '')
+              .replace(/\s*```$/, '');
+              
+            extractedJson = JSON.parse(cleanedJson);
+            console.log("Successfully parsed JSON from code block");
+          } catch (err) {
+            console.log("Failed to parse JSON from code block, trying other methods");
+          }
         }
         
-        // Clean the text to ensure it's valid JSON
-        jsonContent = jsonContent.replace(/^\s*```json\s*/, '')
-                                .replace(/\s*```\s*$/, '');
+        // Strategy 2: Look for a JSON object with schema and sqlCode keys
+        if (!extractedJson) {
+          const fullJsonMatch = content.match(/{[\s\S]*?"schema"[\s\S]*?"sqlCode"[\s\S]*?}/);
+          if (fullJsonMatch) {
+            try {
+              const cleanedJson = fullJsonMatch[0]
+                .replace(/[\u0000-\u001F\u007F-\u009F]/g, "") // Remove control characters
+                .replace(/\\"/g, '"'); // Fix escaped quotes
+                
+              extractedJson = JSON.parse(cleanedJson);
+              console.log("Successfully parsed JSON from full content match");
+            } catch (err) {
+              console.log("Failed to parse JSON from full content match");
+            }
+          }
+        }
         
-        const parsedResponse = JSON.parse(jsonContent);
+        // Strategy 3: Try to extract the parts manually and construct a valid response
+        if (!extractedJson) {
+          console.log("Attempting manual extraction of schema and SQL parts");
+          
+          // Extract schema part
+          const schemaMatch = content.match(/"schema"\s*:\s*({[\s\S]*?})[,\s\n}]/);
+          // Extract sqlCode part
+          const sqlCodeMatch = content.match(/"sqlCode"\s*:\s*"([\s\S]*?)"\s*[,\n}]/);
+          
+          if (schemaMatch && sqlCodeMatch) {
+            try {
+              const schemaStr = schemaMatch[1]
+                .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+                .replace(/\\"/g, '"');
+                
+              const schema = JSON.parse(schemaStr);
+              const sqlCode = sqlCodeMatch[1]
+                .replace(/\\\\/g, "\\")
+                .replace(/\\"/g, '"')
+                .replace(/\\n/g, "\n");
+                
+              extractedJson = { schema, sqlCode };
+              console.log("Successfully extracted schema and SQL manually");
+            } catch (err) {
+              console.log("Failed to extract schema and SQL manually:", err);
+            }
+          }
+        }
+        
+        // If we still couldn't parse the JSON, try a more aggressive approach
+        if (!extractedJson) {
+          // Get the content between the first and last curly braces
+          const lastResortMatch = content.match(/{[\s\S]*}/);
+          if (lastResortMatch) {
+            try {
+              // Try to normalize and fix common issues
+              let jsonStr = lastResortMatch[0]
+                .replace(/[\u0000-\u001F\u007F-\u009F]/g, "")
+                .replace(/,(\s*[}\]])/g, "$1") // Remove trailing commas
+                .replace(/([^\\])\\([^\\"])/g, "$1\\\\$2") // Fix single backslashes
+                .replace(/\\'/g, "'") // Remove escaped single quotes
+                .replace(/(['"])?([a-zA-Z0-9_]+)(['"])?\s*:/g, '"$2":'); // Ensure property names are quoted
+                
+              extractedJson = JSON.parse(jsonStr);
+              console.log("Successfully parsed JSON with aggressive cleaning");
+            } catch (err) {
+              console.log("Failed to parse JSON even with aggressive cleaning:", err);
+            }
+          }
+        }
+        
+        if (!extractedJson) {
+          throw new Error("Could not extract valid JSON from the AI response");
+        }
         
         return {
-          schema: parsedResponse.schema,
-          sqlCode: parsedResponse.sqlCode
+          schema: extractedJson.schema,
+          sqlCode: extractedJson.sqlCode
         };
       } catch (parseError) {
         console.error("Failed to parse Anthropic response:", parseError);
