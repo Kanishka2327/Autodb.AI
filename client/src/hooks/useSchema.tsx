@@ -17,18 +17,9 @@ export function useSchema() {
   // Mutation for generating schema from prompt
   const generateMutation = useMutation({
     mutationFn: async (prompt: string) => {
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        throw new Error("API key is required");
-      }
-
       const response = await apiRequest("POST", "/api/schema/generate", { 
         prompt, 
         dbType 
-      }, {
-        headers: {
-          "x-api-key": apiKey
-        }
       });
       
       return response.json() as Promise<GenerateSchemaResponse>;

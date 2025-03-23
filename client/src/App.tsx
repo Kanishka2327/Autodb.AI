@@ -17,36 +17,11 @@ function Router() {
 }
 
 function App() {
-  const [apiKey, setApiKey] = useState<string | null>(null);
-  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
-
-  useEffect(() => {
-    // Check if there's a saved API key in localStorage
-    const savedApiKey = localStorage.getItem("anthropic_api_key");
-    if (savedApiKey) {
-      setApiKey(savedApiKey);
-    } else {
-      // If no API key is found, show the modal
-      setShowApiKeyModal(true);
-    }
-  }, []);
-
-  const handleSaveApiKey = (key: string) => {
-    localStorage.setItem("anthropic_api_key", key);
-    setApiKey(key);
-    setShowApiKeyModal(false);
-  };
-
+  // API key is now handled server-side via environment variables
   return (
     <QueryClientProvider client={queryClient}>
       <Router />
       <Toaster />
-      {showApiKeyModal && (
-        <ApiKeyModal
-          onSave={handleSaveApiKey}
-          onCancel={() => setShowApiKeyModal(false)}
-        />
-      )}
     </QueryClientProvider>
   );
 }

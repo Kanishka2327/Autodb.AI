@@ -26,13 +26,7 @@ export default function Home() {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
 
   const handleGenerate = (prompt: string) => {
-    // Check for API key
-    const apiKey = localStorage.getItem("anthropic_api_key");
-    if (!apiKey) {
-      setShowApiKeyModal(true);
-      return;
-    }
-    
+    // We now use server-side API key, so no need to check for one in localStorage
     generateSchema(prompt);
   };
 

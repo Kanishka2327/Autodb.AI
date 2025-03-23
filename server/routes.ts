@@ -17,11 +17,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Prompt is required" });
       }
       
-      // Get API key from request header or query param
-      const apiKey = req.headers["x-api-key"] as string || req.query.apiKey as string;
+      // Get API key from environment variable (Replit secrets)
+      const apiKey = process.env.ANTHROPIC_API_KEY as string;
       
       if (!apiKey) {
-        return res.status(401).json({ message: "API key is required" });
+        return res.status(500).json({ message: "API key is not configured on the server" });
       }
       
       // Initialize Anthropic service with API key
