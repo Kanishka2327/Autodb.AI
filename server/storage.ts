@@ -1,31 +1,33 @@
-import { projects, users, type User, type InsertUser, type Project, type InsertProject } from "@shared/schema";
+import { users, type User, type InsertUser } from "@shared/schema";
+import { projects, type Project, type InsertProject } from "@shared/schema";
+import { DatabaseSchema } from "@shared/types";
 
-// Interface for storage operations
 export interface IStorage {
   // User methods
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
+  updateUserApiKey(userId: number, apiKey: string): Promise<User | undefined>;
   
   // Project methods
-  getAllProjects(): Promise<Project[]>;
   getProject(id: number): Promise<Project | undefined>;
+  getProjectsByUserId(userId: number): Promise<Project[]>;
   createProject(project: InsertProject): Promise<Project>;
-  updateProject(id: number, project: InsertProject): Promise<Project | undefined>;
+  updateProject(id: number, project: Partial<InsertProject>): Promise<Project | undefined>;
   deleteProject(id: number): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
   private users: Map<number, User>;
   private projects: Map<number, Project>;
-  private userCurrentId: number;
-  private projectCurrentId: number;
+  private userIdCounter: number;
+  private projectIdCounter: number;
 
   constructor() {
     this.users = new Map();
     this.projects = new Map();
-    this.userCurrentId = 1;
-    this.projectCurrentId = 1;
+    this.userIdCounter = 1;
+    this.projectIdCounter = 1;
   }
 
   // User methods
@@ -40,50 +42,59 @@ export class MemStorage implements IStorage {
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.userCurrentId++;
+    const id = this.userIdCounter++;
     const user: User = { ...insertUser, id };
     this.users.set(id, user);
     return user;
   }
 
-  // Project methods
-  async getAllProjects(): Promise<Project[]> {
-    return Array.from(this.projects.values()).sort((a, b) => {
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return dateB - dateA; // Sort by creation date, newest first
-    });
+  async updateUserApiKey(userId: number, apiKey: string): Promise<User | undefined> {
+    const user = await this.getUser(userId);
+    if (!user) return undefined;
+    
+    const updatedUser = { ...user, apiKey };
+    this.users.set(userId, updatedUser);
+    return updatedUser;
   }
 
+  // Project methods
   async getProject(id: number): Promise<Project | undefined> {
     return this.projects.get(id);
   }
 
+  async getProjectsByUserId(userId: number): Promise<Project[]> {
+    return Array.from(this.projects.values())
+      .filter(project => project.userId === userId);
+  }
+
   async createProject(insertProject: InsertProject): Promise<Project> {
-    const id = this.projectCurrentId++;
-    const createdAt = new Date().toISOString();
-    const project: Project = { ...insertProject, id, createdAt };
+    const id = this.projectIdCounter++;
+    const now = new Date();
+    const project: Project = {
+      ...insertProject,
+      id,
+      createdAt: now,
+      updatedAt: now,
+    };
     this.projects.set(id, project);
     return project;
   }
 
-  async updateProject(id: number, updateProject: InsertProject): Promise<Project | undefined> {
-    const existingProject = this.projects.get(id);
-    if (!existingProject) {
-      return undefined;
-    }
-
+  async updateProject(id: number, projectUpdate: Partial<InsertProject>): Promise<Project | undefined> {
+    const project = await this.getProject(id);
+    if (!project) return undefined;
+    
     const updatedProject: Project = {
-      ...updateProject,
-      id,
-      createdAt: existingProject.createdAt,
+      ...project,
+      ...projectUpdate,
+      updatedAt: new Date(),
     };
-
     this.projects.set(id, updatedProject);
     return updatedProject;
   }
 
   async deleteProject(id: number): Promise<boolean> {
+    if (!this.projects.has(id)) return false;
     return this.projects.delete(id);
   }
 }
