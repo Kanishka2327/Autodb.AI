@@ -18,14 +18,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Get API key from environment variable (Replit secrets)
-      const apiKey = process.env.ANTHROPIC_API_KEY as string;
+      const apiKey = "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";
       
       if (!apiKey) {
         return res.status(500).json({ message: "API key is not configured on the server" });
       }
       
       // Initialize Anthropic service with API key
-      const anthropicService = new AnthropicService(apiKey);
+      const anthropicService = new AnthropicService();
       
       // Generate schema from prompt
       const { schema, sqlCode } = await anthropicService.generateDatabaseSchema(prompt, dbType);
@@ -55,7 +55,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Simple validation by creating a new Anthropic service
       // A more robust implementation would make a lightweight call to the API
       try {
-        const anthropicService = new AnthropicService(apiKey);
+        const anthropicService = new AnthropicService();
         return res.status(200).json({ valid: true });
       } catch (error) {
         return res.status(200).json({ valid: false });

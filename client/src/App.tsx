@@ -6,11 +6,13 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import { useState, useEffect } from "react";
 import ApiKeyModal from "@/components/ApiKeyModal";
+import HeroSection from "./landing_page/hero";
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" component={Home} />
+      <Route path="/" component={HeroSection} />
+      <Route path="/home" component={Home} />
       <Route component={NotFound} />
     </Switch>
   );

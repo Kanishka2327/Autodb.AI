@@ -18,7 +18,7 @@ export default function Header({ onExport, onSave }: HeaderProps) {
         <div className="flex justify-between items-center py-4">
           <div className="flex items-center">
             <Database className="h-8 w-8 text-primary" />
-            <h1 className="ml-2 text-xl font-semibold text-neutral-900">AI DBMS Generator</h1>
+            <h1 className="ml-2 text-xl font-semibold text-neutral-900">AUTODB.AI</h1>
           </div>
           <div className="flex">
             <Button 

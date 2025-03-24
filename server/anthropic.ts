@@ -6,9 +6,9 @@ import { DatabaseSchema } from '@shared/types';
 export class AnthropicService {
   private anthropic: Anthropic;
   
-  constructor(apiKey: string) {
+  constructor() {
     this.anthropic = new Anthropic({
-      apiKey: apiKey,
+      apiKey: "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",
     });
   }
 
