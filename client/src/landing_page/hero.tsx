@@ -26,6 +26,7 @@ const transitionVariants = {
 };
 
 const HeroSection: React.FC = () => {
+    
     return (
         <>
             <HeroHeader />
