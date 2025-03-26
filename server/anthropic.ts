@@ -8,7 +8,7 @@ export class AnthropicService {
   
   constructor() {
     this.anthropic = new Anthropic({
-      apiKey: "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",
+      apiKey: "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",
     });
   }
 

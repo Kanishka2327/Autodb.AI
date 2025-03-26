@@ -18,7 +18,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Get API key from environment variable (Replit secrets)
-      const apiKey = "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";
+      const apiKey = "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";
       
       if (!apiKey) {
         return res.status(500).json({ message: "API key is not configured on the server" });

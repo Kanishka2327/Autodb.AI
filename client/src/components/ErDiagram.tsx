@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -12,11 +12,14 @@ import ReactFlow, {
   MarkerType,
   Position,
   Handle,
+  Connection,
+  useReactFlow,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Button } from "@/components/ui/button";
-import { PlusIcon, KeyRound, Link } from "lucide-react";
+import { PlusIcon, KeyRound, Link, X } from "lucide-react";
 import { Entity, Relationship, Field, DatabaseSchema } from "@shared/types";
+import { v4 as uuidv4 } from "uuid";
 
 // Custom Node Component for Entity Tables
 function EntityNode({ data, selected }: any) {
@@ -93,21 +96,109 @@ function EntityNode({ data, selected }: any) {
   );
 }
 
+// Custom Edge Component with Delete Button
+function CustomEdge(props: any) {
+  const { 
+    id, 
+    sourceX, 
+    sourceY, 
+    targetX, 
+    targetY, 
+    sourcePosition, 
+    targetPosition,
+    style = {},
+    markerEnd,
+    label,
+    data,
+  } = props;
+
+  // Calculate the midpoint of the edge
+  const midX = (sourceX + targetX) / 2;
+  const midY = (sourceY + targetY) / 2;
+
+  return (
+    <>
+      <path
+        id={id}
+        style={style}
+        className="react-flow__edge-path"
+        d={`M${sourceX},${sourceY} Q${midX},${midY} ${targetX},${targetY}`}
+        markerEnd={markerEnd}
+      />
+      {label && (
+        <text
+          x={midX}
+          y={midY}
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          className="react-flow__edge-text"
+          fill="#616e7c"
+        >
+          {label}
+        </text>
+      )}
+      <g 
+        transform={`translate(${midX}, ${midY})`}
+        className="cursor-pointer hover:opacity-75"
+        onClick={() => data.onEdgeDelete(id)}
+      >
+        <circle 
+          r="10" 
+          fill="white" 
+          stroke="#616e7c" 
+          strokeWidth="1"
+        />
+        <X 
+          className="h-3 w-3 text-primary-500" 
+          strokeWidth={2}
+          x="-6" 
+          y="-6"
+        />
+      </g>
+    </>
+  );
+}
+
 // Custom Node Types
 const nodeTypes = {
   entityNode: EntityNode,
 };
 
+// Custom Edge Types
+const edgeTypes = {
+  default: CustomEdge,
+};
+
+// Props Interface
 interface ErDiagramProps {
   schema: DatabaseSchema | null;
   onUpdateSchema: (schema: DatabaseSchema) => void;
   onEditEntity: (entityId: string | null, addField?: boolean) => void;
 }
 
+// Main ER Diagram Component
 export default function ErDiagram({ schema, onUpdateSchema, onEditEntity }: ErDiagramProps) {
+  return (
+    <ReactFlowProvider>
+      <ErDiagramContent 
+        schema={schema} 
+        onUpdateSchema={onUpdateSchema} 
+        onEditEntity={onEditEntity} 
+      />
+    </ReactFlowProvider>
+  );
+}
+
+// ER Diagram Content Component
+function ErDiagramContent({ schema, onUpdateSchema, onEditEntity }: ErDiagramProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  
+  const [selectedConnection, setSelectedConnection] = useState<{
+    sourceEntityId: string | null;
+    sourceFieldId: string | null;
+  }>({ sourceEntityId: null, sourceFieldId: null });
+  const reactFlowInstance = useReactFlow();
+
   // Convert schema to ReactFlow nodes and edges
   useEffect(() => {
     if (!schema) {
@@ -129,6 +220,7 @@ export default function ErDiagram({ schema, onUpdateSchema, onEditEntity }: ErDi
           const updatedRelationships = schema.relationships.filter(
             r => r.sourceEntityId !== entityId && r.targetEntityId !== entityId
           );
+          
           onUpdateSchema({
             entities: updatedEntities,
             relationships: updatedRelationships
@@ -159,12 +251,34 @@ export default function ErDiagram({ schema, onUpdateSchema, onEditEntity }: ErDi
           type: MarkerType.ArrowClosed,
           color: '#616e7c',
         },
+        data: {
+          onEdgeDelete: handleEdgeDelete
+        }
       };
     });
 
     setNodes(newNodes);
     setEdges(newEdges);
   }, [schema, setNodes, setEdges, onEditEntity, onUpdateSchema]);
+
+  // Handle edge deletion
+  const handleEdgeDelete = useCallback((edgeId: string) => {
+    if (!schema) return;
+
+    // Find the relationship to remove
+    const relationshipToRemove = schema.relationships.find(rel => rel.id === edgeId);
+    
+    if (relationshipToRemove) {
+      const updatedRelationships = schema.relationships.filter(
+        rel => rel.id !== edgeId
+      );
+
+      onUpdateSchema({
+        ...schema,
+        relationships: updatedRelationships
+      });
+    }
+  }, [schema, onUpdateSchema]);
 
   // Update schema when nodes positions change
   const onNodeDragStop = (event: React.MouseEvent, node: Node) => {
@@ -186,6 +300,58 @@ export default function ErDiagram({ schema, onUpdateSchema, onEditEntity }: ErDi
     });
   };
 
+  // Handle connection start
+  const onConnectStart = useCallback((event: React.MouseEvent, params: any) => {
+    const sourceNode = reactFlowInstance.getNode(params.nodeId);
+    if (sourceNode) {
+      const sourceEntity = sourceNode.data.entity;
+      const sourceField = sourceEntity.fields.find((f: Field) => 
+        f.isPrimaryKey || f.isForeignKey
+      );
+      
+      setSelectedConnection({
+        sourceEntityId: sourceEntity.id,
+        sourceFieldId: sourceField ? sourceField.id : null
+      });
+    }
+  }, [reactFlowInstance]);
+
+  // Handle connection end
+  const onConnect = useCallback((connection: Connection) => {
+    if (!schema) return;
+
+    const sourceNode = reactFlowInstance.getNode(connection.source!);
+    const targetNode = reactFlowInstance.getNode(connection.target!);
+
+    const sourceEntity = sourceNode?.data.entity;
+    const targetEntity = targetNode?.data.entity;
+
+    // Use the first primary/foreign key fields
+    const sourceField = sourceEntity.fields.find((f: Field) => f.isPrimaryKey || f.isForeignKey);
+    const targetField = targetEntity.fields.find((f: Field) => f.isPrimaryKey || f.isForeignKey);
+
+    if (sourceField && targetField) {
+      const newRelationship: Relationship = {
+        id: uuidv4(),
+        sourceEntityId: sourceEntity.id,
+        targetEntityId: targetEntity.id,
+        sourceFieldId: sourceField.id,
+        targetFieldId: targetField.id,
+        type: 'One-to-Many', // Default relationship type
+      };
+
+      const updatedRelationships = [
+        ...(schema.relationships || []),
+        newRelationship
+      ];
+
+      onUpdateSchema({
+        ...schema,
+        relationships: updatedRelationships
+      });
+    }
+  }, [schema, reactFlowInstance, onUpdateSchema]);
+
   const handleAddEntity = () => {
     onEditEntity(null);
   };
@@ -196,31 +362,32 @@ export default function ErDiagram({ schema, onUpdateSchema, onEditEntity }: ErDi
         <h2 className="font-medium text-neutral-800">ER Diagram</h2>
       </div>
       <div className="flex-1 overflow-hidden">
-        <ReactFlowProvider>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeDragStop={onNodeDragStop}
-            nodeTypes={nodeTypes}
-            fitView
-            className="diagram-container"
-          >
-            <Background />
-            <Controls />
-            <MiniMap />
-            <Panel position="bottom-right">
-              <Button
-                size="icon"
-                className="rounded-full w-12 h-12 shadow-lg"
-                onClick={handleAddEntity}
-              >
-                <PlusIcon className="h-6 w-6" />
-              </Button>
-            </Panel>
-          </ReactFlow>
-        </ReactFlowProvider>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onNodeDragStop={onNodeDragStop}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onConnectStart={onConnectStart}
+          onConnect={onConnect}
+          fitView
+          className="diagram-container"
+        >
+          <Background />
+          <Controls />
+          <MiniMap />
+          <Panel position="bottom-right">
+            <Button
+              size="icon"
+              className="rounded-full w-12 h-12 shadow-lg"
+              onClick={handleAddEntity}
+            >
+              <PlusIcon className="h-6 w-6" />
+            </Button>   
+          </Panel>
+        </ReactFlow>
       </div>
     </div>
   );

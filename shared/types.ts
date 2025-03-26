@@ -30,7 +30,7 @@ export interface Relationship {
   sourceFieldId: string;
   targetEntityId: string;
   targetFieldId: string;
-  type: "1:1" | "1:N" | "N:M";
+  type: "One-to-One" | "One-to-Many" | "Many-to-Many";
 }
 
 export interface DatabaseSchema {
