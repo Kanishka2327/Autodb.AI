@@ -5,28 +5,116 @@ import { useToast } from "@/hooks/use-toast";
 import { DatabaseSchema, Entity, Relationship, GenerateSchemaResponse } from "@shared/types";
 import { v4 as uuidv4 } from "uuid";
 import { convertERToSchema } from "@/lib/utils/schema-parser";
+import { User } from "firebase/auth";
+import { getAuth } from "firebase/auth";
+import { 
+  getFirestore, 
+  collection, 
+  addDoc, 
+  serverTimestamp, 
+  DocumentReference,
+  FirebaseFirestore
+} from "firebase/firestore";
+
+// Define interface for Firestore schema document
+interface SchemaDocument {
+  userId: string;
+  prompt: string;
+  schema: DatabaseSchema;
+  sqlCode: string;
+  dbType: string;
+  createdAt: ReturnType<typeof serverTimestamp>;
+}
 
 export function useSchema() {
+  // State types explicitly defined
   const [schema, setSchema] = useState<DatabaseSchema | null>(null);
   const [sqlCode, setSqlCode] = useState<string>("");
   const [dbType, setDbType] = useState<string>("mysql");
-  const [isUpdatingCode, setIsUpdatingCode] = useState(false);
+  const [isUpdatingCode, setIsUpdatingCode] = useState<boolean>(false);
   const { toast } = useToast();
 
-  // Get API key from local storage
-  const getApiKey = () => localStorage.getItem("anthropic_api_key");
+  // Get API key from local storage (optional)
+  const getApiKey = (): string | null => localStorage.getItem("anthropic_api_key");
 
-  // Mutation for generating schema from prompt
-  const generateMutation = useMutation({
-    mutationFn: async (prompt: string) => {
-      const response = await apiRequest("POST", "/api/schema/generate", { 
-        prompt, 
-        dbType 
+  // Get current user and Firestore instance with explicit typing
+  const auth = getAuth();
+  const firestore = getFirestore();
+
+  // Store schema in Firestore with robust type checking
+  const storeSchemaInFirestore = async (
+    prompt: string, 
+    data: GenerateSchemaResponse
+  ): Promise<DocumentReference | null> => {
+    // Explicit null check for user
+    const user: User | null = auth.currentUser;
+    if (!user) {
+      toast({
+        title: "Authentication Error",
+        description: "User must be logged in to store schema",
+        variant: "destructive",
       });
+      return null;
+    }
+
+    try {
+      // Strongly typed Firestore document
+      const schemaDoc: SchemaDocument = {
+        userId: user.uid,
+        prompt: prompt,
+        schema: data.schema,
+        sqlCode: data.sqlCode,
+        dbType: dbType,
+        createdAt: serverTimestamp()
+      };
+
+      // Reference to the schemas collection for the current user
+      const schemasRef = collection(firestore, `users/${user.uid}/schemas`);
+
+      // Add document with comprehensive error handling
+      return await addDoc(schemasRef, schemaDoc);
+    } catch (error) {
+      // Comprehensive error logging and user notification
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error("Error storing schema in Firestore:", errorMessage);
       
-      return response.json() as Promise<GenerateSchemaResponse>;
+      toast({
+        title: "Firestore Error",
+        description: `Failed to store schema: ${errorMessage}`,
+        variant: "destructive",
+      });
+
+      return null;
+    }
+  };
+
+  // Mutation for generating schema from prompt with explicit typing
+  const generateMutation = useMutation<
+    GenerateSchemaResponse, 
+    Error, 
+    string
+  >({
+    mutationFn: async (prompt: string) => {
+      try {
+        const response = await apiRequest("POST", "/api/schema/generate", { 
+          prompt, 
+          dbType 
+        });
+        
+        const data = await response.json() as GenerateSchemaResponse;
+        
+        // Store the generated schema in Firestore
+        await storeSchemaInFirestore(prompt, data);
+        
+        return data;
+      } catch (error) {
+        // Comprehensive error handling
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error("Schema generation error:", errorMessage);
+        throw new Error(`Failed to generate schema: ${errorMessage}`);
+      }
     },
-    onSuccess: (data) => {
+    onSuccess: (data: GenerateSchemaResponse) => {
       setSchema(data.schema);
       setSqlCode(data.sqlCode);
       
@@ -45,14 +133,14 @@ export function useSchema() {
     }
   });
 
-  // Update entity in schema
+  // Update entity in schema with robust type checking
   const updateEntity = useCallback((entity: Entity) => {
     setSchema((prevSchema) => {
       if (!prevSchema) return null;
 
       const isNew = !prevSchema.entities.some(e => e.id === entity.id);
       
-      let updatedEntities;
+      let updatedEntities: Entity[];
       if (isNew) {
         updatedEntities = [...prevSchema.entities, entity];
       } else {
@@ -68,7 +156,7 @@ export function useSchema() {
     });
   }, []);
 
-  // Add relationship to schema
+  // Add relationship to schema with type safety
   const addRelationship = useCallback((relationship: Relationship) => {
     setSchema((prevSchema) => {
       if (!prevSchema) return null;
@@ -80,13 +168,13 @@ export function useSchema() {
     });
   }, []);
 
-  // Reset schema
+  // Reset schema with clear typing
   const resetSchema = useCallback(() => {
     setSchema(null);
     setSqlCode("");
   }, []);
 
-  // Change database type
+  // Change database type with comprehensive type handling
   const changeDbType = useCallback((type: string) => {
     setDbType(type);
     
@@ -102,16 +190,17 @@ export function useSchema() {
           variant: "default",
         });
       } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         toast({
           title: "Error",
-          description: `Failed to update SQL code: ${(error as Error).message}`,
+          description: `Failed to update SQL code: ${errorMessage}`,
           variant: "destructive",
         });
       }
     }
   }, [schema, toast]);
 
-  // Update SQL code from the current diagram
+  // Update SQL code from the current diagram with enhanced type safety
   const updateCodeFromDiagram = useCallback(() => {
     if (!schema) {
       toast({
@@ -149,9 +238,10 @@ export function useSchema() {
         variant: "default",
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       toast({
         title: "Error",
-        description: `Failed to update SQL code: ${(error as Error).message}`,
+        description: `Failed to update SQL code: ${errorMessage}`,
         variant: "destructive",
       });
     } finally {
@@ -159,7 +249,7 @@ export function useSchema() {
     }
   }, [schema, dbType, toast]);
 
-  // Validate the schema for errors
+  // Validate the schema for errors with comprehensive type checking
   const validateSchema = (schema: DatabaseSchema): string[] => {
     const errors: string[] = [];
     
@@ -234,6 +324,7 @@ export function useSchema() {
     return errors;
   };
 
+  // Return type explicitly defined with comprehensive type safety
   return {
     schema,
     sqlCode,
