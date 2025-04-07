@@ -1,6 +1,7 @@
 # AutoDB.AI - AI-Powered Database Generator
 
-![AutoDB.AI](https://github.com/Kanishka2327/Autodb.AI/blob/main/client/public/image.png?raw=true)
+![AutoDB.AI](images/hero.png)
+
 **🏆 Hack X ACM Hackathon Winning Project**
 
 ## 🚀 Problem Statement
